@@ -1,0 +1,33 @@
+version: 2.1
+
+orbs:
+  shellcheck: circleci/shellcheck@3.4.0
+
+jobs:
+  write-dockerfile:
+    machine:
+      image: ubuntu-2204:current
+    steps:
+      - checkout
+      - run:
+          name: Write Dockerfile
+          command: sh scripts/write-dockerfile.sh
+  new-job:
+    docker:
+      - image: cimg/base:current
+    parameters:
+      changes:
+        type: string
+        default: ""
+    steps:
+      - run: echo "Test it, <<parameters.changes>>"
+
+workflows:
+  build-and-publish:
+    jobs:
+      # - shellcheck/check
+      # - write-dockerfile
+      - new-job:
+          matrix:
+            parameters:
+              changes: [""] # Populated at runtime

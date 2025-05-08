@@ -1,0 +1,22 @@
+version: 2.1
+setup: true
+
+orbs:
+  continuation: circleci/continuation@1.1.0
+
+jobs:
+  detect-and-continue:
+    executor: continuation/default
+    steps:
+      - checkout
+      - run:
+          name: Detect-changes
+          command: ./scripts/detect-changes.sh
+      - continuation/continue:
+          configuration_path: .circleci/push-image.yml
+          # parameters: /tmp/continue-parameters.json
+
+workflows:
+  initiate:
+    jobs:
+      - detect-and-continue
