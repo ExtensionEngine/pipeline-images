@@ -18,7 +18,7 @@ for tag in "${IMAGE_TAGS[@]}"; do
 done
 
 if [[ "${NODE_VERSION}" = "${LTS_VERSION}" ]]; then
-  DOCKER_BUILD_ARGS=("--tag=${IMAGE_NAME}:lts")
+  DOCKER_BUILD_ARGS+=("--tag=${IMAGE_NAME}:lts")
 fi
 
 DOCKER_BUILD_ARGS+=("${DOCKERFILE_DIR}")
