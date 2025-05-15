@@ -1,0 +1,54 @@
+version: 2.1
+
+orbs:
+  security: studion/security@2.1.0
+
+commands:
+  export-env:
+    parameters:
+      env_file_path:
+        type: string
+    steps:
+      - run:
+          name: Export environment
+          environment:
+            ENV_FILE_PATH: <<parameters.env_file_path>>
+          command: ./scripts/export-env.sh
+
+jobs:
+  write-build-push:
+    machine:
+      image: ubuntu-2204:current
+    parameters:
+      env_file_path:
+        type: string
+    steps:
+      - checkout
+      - export-env:
+          env_file_path: <<parameters.env_file_path>>
+      - run:
+          name: Write Dockerfile
+          command: ./scripts/write-dockerfile.sh
+      - run:
+          name: Build image
+          command: ./scripts/build-image.sh
+      - security/install_trivy
+      - run:
+          name: Detect image secrets
+          command: |
+            trivy image --scanners secret --image-config-scanners secret "${IMAGE_NAME_WITH_TAG}"
+      - run:
+          name: Login to Docker Hub
+          command: |
+            echo "${DOCKERHUB_PASSWORD}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
+      - run:
+          name: Push image
+          command: docker image push -a "${IMAGE_NAME}"
+
+workflows:
+  push-image-to-hub:
+    jobs:
+      - write-build-push:
+          matrix:
+            parameters:
+              env_file_path: []
