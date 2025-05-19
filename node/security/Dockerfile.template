@@ -5,6 +5,8 @@ USER root
 
 # Copy executables directly from images to avoid using insecure curl
 COPY --from=zricethezav/gitleaks:${GITLEAKS_VERSION} /usr/bin/gitleaks /usr/local/bin/gitleaks
+COPY --from=anchore/grype:${GRYPE_VERSION} /grype /usr/local/bin/grype
+COPY --from=anchore/syft:${SYFT_VERSION} /syft /usr/local/bin/syft
 COPY --from=aquasec/trivy:${TRIVY_VERSION} /usr/local/bin/trivy /usr/local/bin/trivy
 
 # Install Semgrep explicitly, since coping from the image won't work due to Python bindings
