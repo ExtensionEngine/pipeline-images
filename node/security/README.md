@@ -20,9 +20,11 @@ Example usage in CircleCI as a Docker executor:
     steps:
       - checkout
       - run: |
-          node -v
-          infisical -v
-          gitleaks -v
-          trivy -v
-          semgrep -v
+          node --version
+          infisical --version
+          gitleaks --version
+          grype --version
+          semgrep --version
+          syft --version
+          trivy --version
 ```
