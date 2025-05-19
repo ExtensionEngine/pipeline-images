@@ -16,6 +16,6 @@ Example usage in CircleCI as a Docker executor:
     steps:
       - checkout
       - run: |
-          node -v
-          infisical -v
+          node --version
+          infisical --version
 ```
