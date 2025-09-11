@@ -23,12 +23,14 @@ for var in "${VARS_TO_CHECK[@]}"; do
   fi
 done
 
+set -x
 # Explicitly specify variables for substitution to prevent replacing
 # variables not defined in this context with empty string
 # shellcheck disable=SC2016
 envsubst "$(printf '${%s} ' "${VARS_TO_SUBST[@]}" | sed 's/ $//')" \
   <"${TEMPLATE_DIR}/Dockerfile.template" \
   >"${DOCKERFILE_DIR}/Dockerfile"
+set +x
 
 echo "Successfully written Dockerfile at '${DOCKERFILE_DIR}'"
 echo ""
