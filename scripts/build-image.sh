@@ -4,8 +4,8 @@ VARS_TO_CHECK=(DOCKERFILE_DIR IMAGE_TAGS IMAGE_NAME NODE_VERSION LTS_VERSION)
 EXIT_CODE=0
 
 for var in "${VARS_TO_CHECK[@]}"; do
-  if [[ -z "$var" ]]; then
-    echo "Environment varaible $var not found, set and retry."
+  if [[ -z "${!var}" ]]; then
+    echo "Environment variable $var not found, set and retry."
 
     exit 1
   fi
