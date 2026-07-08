@@ -11,6 +11,7 @@ trunk-filters: &trunk-filters
 
 orbs:
   continuation: circleci/continuation@1.1.0
+  github-cli: circleci/github-cli@3.0.0
   security: studion/security@2.1.0
   shellcheck: circleci/shellcheck@3.4.0
 
@@ -20,6 +21,43 @@ jobs:
     steps:
       - checkout
       - security/scan_dockerfile
+  validate-automation:
+    docker:
+      - image: cimg/node:lts
+    steps:
+      - checkout
+      - run:
+          name: Validate update automation
+          command: ./scripts/updates/validate.sh
+  update-node-env-files:
+    docker:
+      - image: cimg/node:lts
+    environment:
+      DISCOVERY_REPORT_PATH: /tmp/node-update-discovery.json
+    steps:
+      - checkout
+      - github-cli/setup:
+          auth_method: app
+      - run:
+          name: Configure Git author
+          command: |
+            git config user.name "studion-images[bot]"
+            git config user.email "4314765+studion-images[bot]@users.noreply.github.com"
+      - run:
+          name: Discover and apply Node updates
+          command: ./scripts/updates/discover-node-updates.js --apply
+      - run:
+          name: Create or update node-secrets PR
+          command: ./scripts/updates/publish-node-updates-pr.sh secrets
+      - run:
+          name: Create or update node-security PR
+          command: ./scripts/updates/publish-node-updates-pr.sh security
+      - run:
+          name: Update node-security dependency gate
+          command: ./scripts/updates/update-security-pr-gate.sh
+      - store_artifacts:
+          path: /tmp/node-update-discovery.json
+          destination: node-update-discovery.json
   detect-image-changes:
     executor: continuation/default
     steps:
@@ -34,13 +72,23 @@ jobs:
           configuration_path: .circleci/push-image.yml
 
 workflows:
+  weekly-node-updates:
+    triggers:
+      - schedule:
+          cron: "0 9 * * 1"
+          filters: *trunk-filters
+    jobs:
+      - update-node-env-files
   scan-and-detect:
     jobs:
       - shellcheck/check:
+          external_sources: true
           filters: *change-filters
       - scan-dockerfile:
           filters: *change-filters
       - security/detect_secrets_git:
+          filters: *change-filters
+      - validate-automation:
           filters: *change-filters
       - security/detect_secrets_dir:
           filters: *trunk-filters
@@ -51,3 +99,4 @@ workflows:
             - scan-dockerfile
             - security/detect_secrets_git
             - security/detect_secrets_dir
+            - validate-automation
