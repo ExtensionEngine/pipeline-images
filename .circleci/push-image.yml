@@ -1,6 +1,7 @@
 version: 2.1
 
 orbs:
+  github-cli: circleci/github-cli@3.0.0
   security: studion/security@2.1.0
 
 commands:
@@ -45,10 +46,23 @@ jobs:
           name: Push image
           command: docker image push -a "${IMAGE_NAME}"
 
+  update-security-pr-gate:
+    docker:
+      - image: cimg/node:lts
+    steps:
+      - checkout
+      - github-cli/setup:
+          auth_method: app
+      - run:
+          name: Update node-security dependency gate
+          command: ./scripts/updates/update-security-pr-gate.sh
+
 workflows:
   push-image-to-hub:
     jobs:
       - write-build-push:
           matrix:
+            alias: write-build-push
             parameters:
               env_file_path: []
+      - update-security-pr-gate
