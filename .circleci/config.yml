@@ -15,6 +15,11 @@ orbs:
   security: studion/security@2.1.0
   shellcheck: circleci/shellcheck@3.4.0
 
+parameters:
+  scheduled_image_env_updates:
+    type: boolean
+    default: false
+
 jobs:
   scan-dockerfile:
     executor: security/node
@@ -29,7 +34,7 @@ jobs:
       - run:
           name: Validate update automation
           command: ./scripts/updates/validate.sh
-  update-node-env-files:
+  update-image-env-files:
     docker:
       - image: cimg/node:lts
     environment:
@@ -72,14 +77,12 @@ jobs:
           configuration_path: .circleci/push-image.yml
 
 workflows:
-  weekly-node-updates:
-    triggers:
-      - schedule:
-          cron: "0 9 * * 1"
-          filters: *trunk-filters
+  run-image-automation:
+    when: <<pipeline.parameters.scheduled_image_env_updates>>
     jobs:
-      - update-node-env-files
+      - update-image-env-files
   scan-and-detect:
+    unless: <<pipeline.parameters.scheduled_image_env_updates>>
     jobs:
       - shellcheck/check:
           external_sources: true
