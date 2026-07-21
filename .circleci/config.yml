@@ -41,13 +41,16 @@ jobs:
       DISCOVERY_REPORT_PATH: /tmp/node-update-discovery.json
     steps:
       - checkout
-      - github-cli/setup:
-          auth_method: app
       - run:
-          name: Configure Git author
+          name: Configure Git
           command: |
             git config user.name "studion-images[bot]"
             git config user.email "4314765+studion-images[bot]@users.noreply.github.com"
+            git config --global --unset-all url."ssh://git@github.com/".insteadOf 2>/dev/null || true
+            git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+            git config --global url."https://github.com/".insteadOf "git@github.com:"
+      - github-cli/setup:
+          auth_method: app
       - run:
           name: Discover and apply Node updates
           command: ./scripts/updates/discover-node-updates.js --apply
