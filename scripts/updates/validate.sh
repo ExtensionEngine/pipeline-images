@@ -217,10 +217,27 @@ test_discovery_configuration() {
 write_publisher_report() {
   local mode="$1" path="$2" version="$3"
 
-  jq -n --arg mode "$mode" --arg path "$path" --arg version "$version" '
-    {dryRun: false, generatedAt: "2026-07-16T00:00:00Z", changes: {secrets: [], security: []}, skipped: []}
-    | .changes[$mode] = [{path: $path, major: ($path | split("/") | last | tonumber), currentNodeVersion: "old", latestNodeVersion: $version, classification: "patch", toolChanges: []}]
-  '
+  case "$mode" in
+  secrets)
+    jq -n --arg mode "$mode" --arg path "$path" --arg version "$version" '
+      {dryRun: false, generatedAt: "2026-07-16T00:00:00Z", changes: {secrets: [], security: []}, skipped: []}
+      | .changes[$mode] = [{path: $path, major: ($path | split("/") | last | tonumber), currentNodeVersion: "old", latestNodeVersion: $version, classification: "patch", toolChanges: [{variable: "INFISICAL_VERSION", current: "0.20.0", selected: "0.21.0"}]}]
+    '
+    ;;
+  security)
+    jq -n --arg mode "$mode" --arg path "$path" --arg version "$version" '
+      {dryRun: false, generatedAt: "2026-07-16T00:00:00Z", changes: {secrets: [], security: []}, skipped: []}
+      | .changes[$mode] = [{path: $path, major: ($path | split("/") | last | tonumber), currentNodeVersion: "old", latestNodeVersion: $version, classification: "patch", toolChanges: [
+          {variable: "GITLEAKS_VERSION", current: "v8.1.0", selected: "v8.1.1"},
+          {variable: "GRYPE_VERSION", current: "v0.90.0", selected: "v0.90.1"},
+          {variable: "SEMGREP_VERSION", current: "1.50.0", selected: "1.50.1"},
+          {variable: "SYFT_VERSION", current: "v0.90.0", selected: "v0.90.1"},
+          {variable: "TRIVY_VERSION", current: "0.50.0", selected: "0.50.1"},
+          {variable: "FUTURE_TOOL_VERSION", current: "1.0.0", selected: "1.1.0"}
+        ]}]
+    '
+    ;;
+  esac
 }
 
 write_noop_report() {
@@ -248,7 +265,7 @@ run_publisher_configuration_and_noop_tests() (
 )
 
 run_publisher_tests() (
-  local tmp report log mode path version output worktree
+  local tmp report log body mode path version output worktree
 
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
@@ -286,13 +303,20 @@ printf '%s\n' "$*" >>"${MOCK_COMMAND_LOG:?}"
 pr='{"number":42,"url":"https://example.test/pr/42","isDraft":false,"body":"","headRefOid":"test-sha"}'
 case "$1 $2" in
   "auth status"|"pr ready") ;;
-  "pr list") [[ "${MOCK_EXISTING_PR:-true}" == true ]] && printf '%s\n' "$pr" ;;
+  "pr list")
+    if [[ " $* " == *' --head automation/node-secrets-updates '* ]]; then
+      [[ "${MOCK_SECRETS_PR:-true}" == true ]] && printf '%s\n' "$pr"
+    else
+      [[ "${MOCK_EXISTING_PR:-true}" == true ]] && printf '%s\n' "$pr"
+    fi
+    ;;
   "pr view") printf '%s\n' "$pr" ;;
   "pr edit")
     for ((index = 1; index <= $#; index++)); do
       [[ "${!index}" == --body-file ]] || continue
       next_index=$((index + 1))
       [[ -s "${!next_index}" ]]
+      cp "${!next_index}" "${MOCK_PR_BODY_FILE:?}"
     done
     ;;
   *) printf 'unexpected gh args: %s\n' "$*" >&2; exit 1 ;;
@@ -306,6 +330,7 @@ SH
       security) path=node/security/24; version=24.14.0 ;;
     esac
     report="$tmp/$mode-report.json"
+    body="$tmp/$mode-body.md"
     write_publisher_report "$mode" "$path" "$version" >"$report"
     mkdir -p "$tmp/repo/$(dirname "$path")"
     printf 'NODE_VERSION=old\n' >"$tmp/repo/$path"
@@ -314,7 +339,7 @@ SH
       cd "$tmp/repo"
       PATH="$tmp:$PATH" MOCK_COMMAND_LOG="$log" MOCK_CHANGED_PATH="$path" \
         MOCK_BRANCH="automation/node-$mode-updates" MOCK_WORKTREE_PATH="$tmp/worktree" \
-        DISCOVERY_REPORT_PATH="$report" "$PUBLISHER_SCRIPT" "$mode"
+        MOCK_PR_BODY_FILE="$body" DISCOVERY_REPORT_PATH="$report" "$PUBLISHER_SCRIPT" "$mode"
     )"
     [[ "$output" == "Published node-$mode update PR." ]]
     grep -Fq "worktree add --force -B automation/node-$mode-updates" "$log"
@@ -323,10 +348,57 @@ SH
     worktree="$(<"$tmp/worktree")"
     [[ ! -e "$worktree" ]]
     grep -Fq "pr edit 42 --title feat: \`node-$mode\` $version" "$log"
+    case "$mode" in
+    secrets)
+      grep -Fqx -- "- \`node/secrets/22\`: Node old -> 22.22.1 (patch); Infisical 0.20.0 -> 0.21.0" "$body"
+      if grep -Fq 'INFISICAL_VERSION' "$body"; then
+        printf 'Secrets PR body exposed an environment variable name.\n' >&2
+        return 1
+      fi
+      ;;
+    security)
+      for name in Gitleaks Grype Semgrep Syft Trivy; do
+        grep -Fq "$name " "$body"
+      done
+      grep -Fq 'FUTURE_TOOL_VERSION 1.0.0 -> 1.1.0' "$body"
+      grep -Fq 'Status: **pending**' "$body"
+      grep -Fq "Related \`node-secrets\` update: https://example.test/pr/42." "$body"
+      for variable in GITLEAKS_VERSION GRYPE_VERSION SEMGREP_VERSION SYFT_VERSION TRIVY_VERSION; do
+        if grep -Fq "$variable" "$body"; then
+          printf 'Security PR body exposed %s.\n' "$variable" >&2
+          return 1
+        fi
+      done
+      ;;
+    esac
     if [[ "$mode" == security ]]; then
       grep -Fqx 'pr ready 42 --undo' "$log"
     fi
   done
+
+  mode=security
+  path=node/security/26
+  version=26.5.0
+  report="$tmp/security-new-major-report.json"
+  body="$tmp/security-new-major-body.md"
+  write_publisher_report "$mode" "$path" "$version" |
+    jq '.changes.security[0] |= (.currentNodeVersion = "" | .classification = "new-major" | .toolChanges = [])' >"$report"
+  printf 'NODE_VERSION=old\n' >"$tmp/repo/$path"
+  : >"$log"
+  output="$(
+    cd "$tmp/repo"
+    PATH="$tmp:$PATH" MOCK_COMMAND_LOG="$log" MOCK_CHANGED_PATH="$path" \
+      MOCK_BRANCH=automation/node-security-updates MOCK_WORKTREE_PATH="$tmp/new-major-worktree" \
+      MOCK_PR_BODY_FILE="$body" MOCK_SECRETS_PR=false DISCOVERY_REPORT_PATH="$report" \
+      "$PUBLISHER_SCRIPT" "$mode"
+  )"
+  [[ "$output" == 'Published node-security update PR.' ]]
+  grep -Fqx -- "- \`node/security/26\`: Node 26.5.0 (new major); Security tools unchanged" "$body"
+  grep -Fq "Required matching \`node-secrets\` image tags will be checked before this PR is ready." "$body"
+  if grep -Fq "Related \`node-secrets\` update:" "$body" || grep -Fq 'Node ->' "$body"; then
+    printf 'Security new-major PR body contained inaccurate dependency or transition text.\n' >&2
+    return 1
+  fi
 
   mode=secrets
   path=node/secrets/22
@@ -338,7 +410,7 @@ SH
     cd "$tmp/repo"
     PATH="$tmp:$PATH" MOCK_COMMAND_LOG="$log" MOCK_CHANGED_PATH="$path" \
       MOCK_BRANCH="automation/node-secrets-updates" MOCK_WORKTREE_PATH="$tmp/refresh-worktree" \
-      MOCK_STAGED=false MOCK_EXISTING_PR=true DISCOVERY_REPORT_PATH="$report" \
+      MOCK_STAGED=false MOCK_EXISTING_PR=true MOCK_PR_BODY_FILE="$body" DISCOVERY_REPORT_PATH="$report" \
       "$PUBLISHER_SCRIPT" "$mode"
   )"
   [[ "$output" == 'Refreshed existing node-secrets update PR; no new commit was needed.' ]]
@@ -382,7 +454,14 @@ run_gate_test() (
 
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
-  printf 'Existing body\n' >"$tmp/pr-body.md"
+  printf '%s\n' \
+    'Existing body' \
+    '<!-- node-security-dependency-gate:start -->' \
+    '## Dependency Gate' \
+    'Status: **pending**' \
+    '<!-- node-security-dependency-gate:end -->' \
+    '## Related Update' \
+    "Related \`node-secrets\` update: https://example.test/pr/7." >"$tmp/pr-body.md"
   cat >"$tmp/gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -432,6 +511,8 @@ SH
   [[ "$(grep -Fxc '<!-- node-security-dependency-gate:start -->' "$tmp/pr-body.md")" == 1 ]]
   [[ "$(grep -Fxc '<!-- node-security-dependency-gate:end -->' "$tmp/pr-body.md")" == 1 ]]
   grep -Fqx 'Existing body' "$tmp/pr-body.md"
+  grep -Fqx '## Related Update' "$tmp/pr-body.md"
+  grep -Fqx "Related \`node-secrets\` update: https://example.test/pr/7." "$tmp/pr-body.md"
 )
 
 run_cli_diagnostic_test() {

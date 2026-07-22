@@ -35,6 +35,13 @@ format_secrets_body() {
 
   jq -r -f <(
     cat <<'EOF'
+def nodeChange(change):
+  if change.classification == "new-major" then
+    "Node \(change.latestNodeVersion) (new major)"
+  else
+    "Node \(change.currentNodeVersion) -> \(change.latestNodeVersion) (\(change.classification))"
+  end;
+
 def toolChanges(change):
   if (change.toolChanges | length) == 0 then
     "Infisical unchanged"
@@ -45,10 +52,8 @@ def toolChanges(change):
   end;
 
 [
-  "## Summary", "",
-  "Updates `node-secrets` env files for eligible even-major Node.js releases.", "",
   "## Changes", "",
-  (if (.changes.secrets | length) > 0 then .changes.secrets[] | "- `\(.path)`: Node \(.currentNodeVersion // "new") -> \(.latestNodeVersion) (\(.classification)); \(toolChanges(.))" else "- No `node-secrets` changes." end),
+  (if (.changes.secrets | length) > 0 then .changes.secrets[] | "- `\(.path)`: \(nodeChange(.)); \(toolChanges(.))" else "- No `node-secrets` changes." end),
   "", "## Skipped", "",
   ([.skipped[] | select(.image == "secrets") | "- Node \(.major) (\(.nodeVersion)): \(.reason)"] | if length > 0 then .[] else "- None" end),
   "", "## Merge Notes", "",
@@ -61,35 +66,51 @@ EOF
 format_security_body() {
   local body_file="$1"
   local secrets_pr="$2"
-  local dependency url
+  local related_update url
 
   url="$(jq -r '.url // empty' <<<"$secrets_pr")"
   if [[ -n "$url" ]]; then
-    dependency="Depends on \`node-secrets\` PR $url."
+    related_update="Related \`node-secrets\` update: $url."
   else
-    dependency="Depends on the \`node-secrets\` update PR from branch \`$SECRETS_UPDATES_BRANCH\`."
+    related_update=""
   fi
 
-  jq -r --arg dependency "$dependency" -f <(
+  jq -r --arg relatedUpdate "$related_update" -f <(
     cat <<'EOF'
+def nodeChange(change):
+  if change.classification == "new-major" then
+    "Node \(change.latestNodeVersion) (new major)"
+  else
+    "Node \(change.currentNodeVersion) -> \(change.latestNodeVersion) (\(change.classification))"
+  end;
+
+def toolName($variable):
+  {
+    "GITLEAKS_VERSION": "Gitleaks",
+    "GRYPE_VERSION": "Grype",
+    "SEMGREP_VERSION": "Semgrep",
+    "SYFT_VERSION": "Syft",
+    "TRIVY_VERSION": "Trivy"
+  }[$variable] // $variable;
+
 def toolChanges(change):
   if (change.toolChanges | length) == 0 then
-    "security tools unchanged"
+    "Security tools unchanged"
   else
     change.toolChanges
-    | map("\(.variable) \(.current) -> \(.selected)")
+    | map("\(toolName(.variable)) \(.current) -> \(.selected)")
     | join(", ")
   end;
 
 [
-  "## Summary", "",
-  "Updates `node-security` env files for eligible even-major Node.js releases.", "",
-  "## Dependency", "",
-  $dependency,
-  "Do not merge this PR until the matching `studiondev/node-secrets:<NODE_VERSION>` image tags are published.",
-  "This PR is created as draft/blocked by default; the dependency gate updates readiness after checking the required image tags.",
+  "<!-- node-security-dependency-gate:start -->",
+  "## Dependency Gate", "",
+  "Status: **pending**", "",
+  "Required matching `node-secrets` image tags will be checked before this PR is ready.",
+  "<!-- node-security-dependency-gate:end -->",
+  (if $relatedUpdate != "" then ["", "## Related Update", "", $relatedUpdate] else [] end)[],
   "", "## Changes", "",
-  (if (.changes.security | length) > 0 then .changes.security[] | "- `\(.path)`: Node \(.currentNodeVersion // "new") -> \(.latestNodeVersion) (\(.classification)); \(toolChanges(.))" else "- No node-security changes." end),
+  (if (.changes.security | length) > 0 then .changes.security[] | "- `\(.path)`: \(nodeChange(.)); \(toolChanges(.))" else "- No `node-security` changes." end),
   "", "## Skipped", "",
   ([.skipped[] | select(.image == "security") | "- Node \(.major) (\(.nodeVersion)): \(.reason)"] | if length > 0 then .[] else "- None" end),
   "", "## Merge Notes", "",
