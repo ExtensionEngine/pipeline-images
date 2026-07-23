@@ -65,4 +65,6 @@ workflows:
             alias: write-build-push
             parameters:
               env_file_path: []
-      - update-security-pr-gate
+      - update-security-pr-gate:
+          requires:
+            - write-build-push
