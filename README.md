@@ -40,7 +40,7 @@ Where:
   - **Version Alias (`lts`):** This tag, `lts`, is dynamically determined during the build process.
     It refers to the current LTS version of the target runtime environment.
 
-## Build
+## Build and Publish
 
 The process of building and pushing these Docker images is fully automated
 through the CI/CD pipeline.
@@ -50,45 +50,106 @@ through the CI/CD pipeline.
 - Whenever code is pushed to the trunk, the pipeline examines the latest commit
   for modifications to any of the **env files**.
 - If changes are detected, a dedicated workflow is automatically triggered.
-  This workflow builds the Docker image(s) and afterwards pushes them to Docker Hub.
+  This workflow builds the Docker image(s) and then pushes them to Docker Hub.
 
-**Updating an Image:**
+## Automated Image Updates
 
-To update an image, primarily area of focus is corresponding **env file**:
+A scheduled CI pipeline checks for available Node.js and included tools updates.
+When updates are found, it modifies the corresponding **env files** and creates
+or updates separate pull requests for `node-secrets` and `node-security`.
 
-1.  **Modify the Env File:** Update the versions of the target runtime environment,
-    any tools used within the image, and the desired image tags in the relevant **env file**.
+**How updates are selected:**
 
-    **NOTE** Avoid introducing breaking changes. As a general guideline, follow semantic
-    versioning scheme and take the target runtime environment as a reference. For example,
-    if bumping a patch version of the target runtime environment, bump only the patch versions
-    of the utilized tools as well.
+- Only even-numbered Node.js major releases are considered.
+- Existing supported majors can receive patch or minor updates.
+- A new supported major can be added using the latest existing **env file**
+  as a template.
+- Included tools are updated based on the Node.js update:
+  - A Node.js patch update allows tool patch updates.
+  - A Node.js minor update allows tool patch or minor updates.
+  - A new Node.js major can use newer tool major versions.
 
-2.  **Commit Changes:** Commit modifications to a feature branch. Adhere to
-    the following commit message convention:
+**How pull requests work:**
 
-    ``feat: `<image-name>` <runtime-versions>``
+- `node-secrets` and `node-security` updates are created in separate pull
+  requests.
+- An existing automation pull request is updated when further changes are found.
+- Pull request titles follow this convention:
 
-    For example: ``feat: `node-secrets` 18.20.8, 20.19.2, 22.15.2``
+  ```
+  feat: `<image-name>` <runtime-versions>
+  ```
 
-3.  **Create a Pull Request:** Open a pull request with your changes.
-4.  **Squash and Merge the Pull Request:** Once your pull request is reviewed and approved,
-    squash and merged it. The CI/CD pipeline will automatically detect the changes in the trunk.
-    This will initiate the workflow resulting in the updated image being pushed to Docker Hub.
+- Pull request descriptions list the applied and skipped updates.
+- A `node-security` pull request starts as a draft because the image depends
+  on `node-secrets`.
+
+For each changed `node/security/<major>` **env file**, the pipeline checks
+Docker Hub for the `node-secrets` image tag that uses the exact Node.js version.
+The security pull request remains draft until all required images are available.
+When image changes are merged to the trunk, this check runs after all affected
+images have been built and pushed.
+
+## Manual Image Updates
+
+Manual updates remain available as a fallback when an eligible update needs to
+be made outside the scheduled automation.
+
+1. **Modify the Env File:** Update the versions of the target runtime environment,
+   any tools used within the image, and the desired image tags in the relevant **env file**.
+
+   **NOTE** Avoid introducing breaking changes. As a general guideline, follow semantic
+   versioning scheme and take the target runtime environment as a reference. For example,
+   if bumping a patch version of the target runtime environment, bump only the patch versions
+   of the utilized tools as well.
+
+2. **Commit Changes:** Commit modifications to a feature branch. Adhere to
+   the following commit message convention:
+
+   ```
+   feat: `<image-name>` <runtime-versions>
+   ```
+
+   For example:
+
+   ```
+   feat: `node-secrets` 18.20.8, 20.19.2, 22.15.2
+   ```
+
+3. **Create a Pull Request:** Open a pull request with your changes.
+4. **Squash and Merge the Pull Request:** Once your pull request is reviewed and approved,
+   squash and merge it. The CI/CD pipeline will automatically detect the changes in the trunk.
+   This initiates the workflow that pushes the updated image to Docker Hub.
+
+## Development and Validation
+
+Preview eligible and skipped updates without modifying env files:
+
+```bash
+./scripts/updates/discover-node-updates.js --dry-run
+```
+
+Run the automation validation suite:
+
+```bash
+./scripts/updates/validate.sh
+```
+
+The `--apply` mode modifies env files and requires `DISCOVERY_REPORT_PATH`; it
+is intended for the configured automation workflow rather than routine local
+previewing.
 
 ## Limitations
 
 Current approach has a few limitations to be aware of:
 
-- **Manual update process:** Updating image versions is a manual process, which carries
-  the risk of specifying non-existent versions for the target runtime environment or other tools.
-  These errors will only be caught when the build process fails after the changes are merged into the trunk.
+- **External release availability:** Automated updates depend on the Node.js
+  release index, Docker Hub, PyPI, and the corresponding upstream `cimg/node`
+  image tag. An update can be skipped until all required upstream releases and
+  images are available.
 - **Single Dockerfile template:** Currently only support one `Docker.template` file per image.
   This can make it challenging to manage and introduce significant changes for new major versions of
   the target runtime environment without potentially breaking compatibility with older versions.
-- **Inter-image dependency:** The `node-security` image has a dependency on the `node-secrets` image.
-  This means that the `node-secrets` image must be successfully pushed before any changes can be
-  made to the `node-security` image.
 - **Last commit inspection:** The CI/CD pipeline only inspects the very last commit pushed to the trunk
   for the image-related changes. If multiple commits are pushed at once, changes in earlier
   commits will be missed, and the image update process will not be triggered.
